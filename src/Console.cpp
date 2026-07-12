@@ -142,23 +142,26 @@ void Console::_cmdSend(const String& args) {
 
     if (device.isEmpty() || button.isEmpty()) {
         Serial.println(F("[send] Uso: send <dispositivo> <boton>"));
+        Serial.println(F("        Ejemplo: send Samsung POWER"));
         return;
     }
 
-    // Verificar que el botón existe en Storage
-    IRSignal signal = _storage->loadButton(device, button);
+    const IRSignal signal = _storage->loadButton(device, button);
     if (!signal.valid) {
         Serial.printf("[send] Botón no encontrado: %s / %s\n",
                       device.c_str(), button.c_str());
         return;
     }
 
-    // TODO v0.3: _sender->send(signal)
-    Serial.println(F("[send] Emisión IR no disponible hasta v0.3 (LED IR no conectado)."));
-    Serial.printf("[send] Señal encontrada: protocolo=%s valor=%s bits=%u\n",
-                  signal.protocolName().c_str(),
-                  signal.valueHex().c_str(),
-                  signal.bits);
+    Serial.printf("[send] Emitiendo %s / %s (protocolo: %s)...\n",
+                  device.c_str(), button.c_str(),
+                  signal.protocolName().c_str());
+
+    if (_sender->send(signal)) {
+        Serial.println(F("[send] OK"));
+    } else {
+        Serial.println(F("[send] ERROR: la emisión falló."));
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -293,7 +296,7 @@ void Console::_cmdRestart() {
 void Console::_cmdHelp() {
     Serial.println(F("\n──── Comandos disponibles ──────────────────"));
     Serial.println(F("  learn <dispositivo> <boton>  — Aprende señal IR y la guarda"));
-    Serial.println(F("  send  <dispositivo> <boton>  — Emite señal IR  [v0.3]"));
+    Serial.println(F("  send  <dispositivo> <boton>  — Emite señal IR"));
     Serial.println(F("  list                         — Lista todos los botones"));
     Serial.println(F("  devices                      — Lista dispositivos guardados"));
     Serial.println(F("  buttons <dispositivo>        — Botones de un dispositivo"));

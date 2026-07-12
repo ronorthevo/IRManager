@@ -97,6 +97,11 @@ void setup() {
     receiver.begin();
     Serial.println(F("[Receiver] OK — Escuchando señales IR."));
 
+    // Emisor IR — begin() reserva el canal RMT del GPIO.
+    // El LED IR no necesita estar físicamente conectado para inicializar.
+    Serial.printf("[Sender] Iniciando en GPIO %d...\n", IR_SEND_PIN);
+    sender.begin();
+
     // [STUB v0.5] wifiManager.begin()
     // [STUB v0.6] webServer.begin()
 
