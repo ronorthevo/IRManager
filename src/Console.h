@@ -11,6 +11,7 @@
 class Storage;
 class Receiver;
 class Sender;
+class WifiManager;
 
 // ─────────────────────────────────────────────────────────────
 //  PendingLearn
@@ -30,7 +31,8 @@ struct PendingLearn {
 // ─────────────────────────────────────────────────────────────
 class Console {
 public:
-    Console(Storage* storage, Receiver* receiver, Sender* sender);
+    Console(Storage* storage, Receiver* receiver, Sender* sender,
+            WifiManager* wifi);
 
     // Imprime el banner de bienvenida al arrancar.
     void printBanner();
@@ -50,9 +52,10 @@ public:
     void notifyLearnFailed (const String& device, const String& button);
 
 private:
-    Storage*    _storage;
-    Receiver*   _receiver;
-    Sender*     _sender;
+    Storage*     _storage;
+    Receiver*    _receiver;
+    Sender*      _sender;
+    WifiManager* _wifi;
 
     String      _inputBuffer;
     PendingLearn _pending;
@@ -67,6 +70,7 @@ private:
     void _cmdDevices();
     void _cmdButtons(const String& args);
     void _cmdDelete (const String& args);
+    void _cmdWifi   (const String& args);
     void _cmdStatus ();
     void _cmdRestart();
     void _cmdHelp   ();

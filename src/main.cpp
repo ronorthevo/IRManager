@@ -33,7 +33,7 @@ static Sender      sender(IR_SEND_PIN);
 static Storage     storage;
 static WifiManager wifiManager;
 static WebServer   webServer(80);
-static Console     console(&storage, &receiver, &sender);
+static Console     console(&storage, &receiver, &sender, &wifiManager);
 
 // ─────────────────────────────────────────────────────────────
 //  Helpers de impresión IR
@@ -102,8 +102,10 @@ void setup() {
     Serial.printf("[Sender] Iniciando en GPIO %d...\n", IR_SEND_PIN);
     sender.begin();
 
-    // [STUB v0.5] wifiManager.begin()
     // [STUB v0.6] webServer.begin()
+
+    // WiFi AP+STA con portal cautivo
+    wifiManager.begin();
 
     Serial.println();
     Serial.println(F("[IRManager] Sistema listo."));
@@ -145,6 +147,7 @@ void loop() {
         receiver.resume();
     }
 
-    // ── 3. Módulos futuros ───────────────────────────────────
-    // [STUB v0.5] wifiManager.loop()
+    // ── 3. WiFi ───────────────────────────────────────
+    wifiManager.loop();
+    // [STUB v0.6] webServer implicitly handled by AsyncWebServer
 }

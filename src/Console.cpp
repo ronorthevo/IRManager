@@ -7,14 +7,17 @@
 #include "Storage.h"
 #include "Receiver.h"
 #include "Sender.h"
+#include "WifiManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  Constructor
 // ─────────────────────────────────────────────────────────────
-Console::Console(Storage* storage, Receiver* receiver, Sender* sender)
+Console::Console(Storage* storage, Receiver* receiver, Sender* sender,
+                 WifiManager* wifi)
     : _storage(storage)
     , _receiver(receiver)
     , _sender(sender)
+    , _wifi(wifi)
 {
 }
 
@@ -87,6 +90,7 @@ void Console::_dispatch(const String& line) {
     else if (cmd.equalsIgnoreCase("devices")) _cmdDevices();
     else if (cmd.equalsIgnoreCase("buttons")) _cmdButtons(args);
     else if (cmd.equalsIgnoreCase("delete"))  _cmdDelete(args);
+    else if (cmd.equalsIgnoreCase("wifi"))    _cmdWifi(args);
     else if (cmd.equalsIgnoreCase("status"))  _cmdStatus();
     else if (cmd.equalsIgnoreCase("restart")) _cmdRestart();
     else if (cmd.equalsIgnoreCase("help"))    _cmdHelp();
@@ -259,6 +263,62 @@ void Console::_cmdDelete(const String& args) {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  _cmdWifi()
+//  Uso: wifi <ssid> <password>   → guarda credenciales y reinicia
+//       wifi clear               → borra credenciales
+//       wifi                     → muestra estado actual
+// ─────────────────────────────────────────────────────────────
+void Console::_cmdWifi(const String& args) {
+    if (args.isEmpty()) {
+        // Mostrar estado actual
+        Serial.println(F("\n──── Estado WiFi ────────────────────────────"));
+        switch (_wifi->state()) {
+            case WifiState::CONNECTED_STA:
+                Serial.printf("  Modo  : STA (conectado)\n");
+                Serial.printf("  SSID  : %s\n",  _wifi->staSSID().c_str());
+                Serial.printf("  IP    : %s\n",  _wifi->localIP().c_str());
+                Serial.printf("  RSSI  : %d dBm\n", _wifi->rssi());
+                break;
+            case WifiState::AP_ACTIVE:
+                Serial.printf("  Modo  : AP (portal de configuracion)\n");
+                Serial.printf("  SSID  : %s\n",  WifiConfig::AP_SSID);
+                Serial.printf("  IP    : %s\n",  _wifi->apIP().c_str());
+                Serial.println(F("  Usa: wifi <ssid> <password>"));
+                break;
+            default:
+                Serial.println(F("  Estado: desconectado"));
+                break;
+        }
+        Serial.println(F("─────────────────────────────────────────────\n"));
+        return;
+    }
+
+    // wifi clear
+    String arg0;
+    String rest;
+    arg0 = _firstToken(args, rest);
+    if (arg0.equalsIgnoreCase("clear")) {
+        _wifi->clearCredentials();
+        Serial.println(F("[wifi] Credenciales borradas. Reinicia para aplicar."));
+        return;
+    }
+
+    // wifi <ssid> <password>
+    const String ssid     = arg0;
+    const String password = rest;
+    if (ssid.isEmpty() || password.isEmpty()) {
+        Serial.println(F("[wifi] Uso:"));
+        Serial.println(F("  wifi <ssid> <password>  — configura WiFi"));
+        Serial.println(F("  wifi clear              — borra credenciales"));
+        Serial.println(F("  wifi                    — muestra estado"));
+        return;
+    }
+
+    Serial.printf("[wifi] Guardando credenciales para '%s'...\n", ssid.c_str());
+    _wifi->setCredentials(ssid, password);   // reinicia internamente
+}
+
+// ─────────────────────────────────────────────────────────────
 //  _cmdStatus()
 // ─────────────────────────────────────────────────────────────
 void Console::_cmdStatus() {
@@ -277,7 +337,25 @@ void Console::_cmdStatus() {
                   fsFree  / 1024, fsTotal / 1024);
     Serial.printf("  Receptor     : %s\n",
                   _receiver->isListening() ? "escuchando" : "suspendido");
-    Serial.printf("  WiFi         : no configurado (v0.5)\n");
+
+    // Estado WiFi
+    switch (_wifi->state()) {
+        case WifiState::CONNECTED_STA:
+            Serial.printf("  WiFi         : STA — %s (%s) %d dBm\n",
+                          _wifi->staSSID().c_str(),
+                          _wifi->localIP().c_str(),
+                          _wifi->rssi());
+            break;
+        case WifiState::AP_ACTIVE:
+            Serial.printf("  WiFi         : AP — %s (%s)\n",
+                          WifiConfig::AP_SSID,
+                          _wifi->apIP().c_str());
+            break;
+        default:
+            Serial.println(F("  WiFi         : desconectado"));
+            break;
+    }
+
     Serial.println(F("────────────────────────────────────────────\n"));
 }
 
@@ -301,6 +379,7 @@ void Console::_cmdHelp() {
     Serial.println(F("  devices                      — Lista dispositivos guardados"));
     Serial.println(F("  buttons <dispositivo>        — Botones de un dispositivo"));
     Serial.println(F("  delete <dispositivo> <boton> — Borra un botón"));
+    Serial.println(F("  wifi [<ssid> <pass>|clear]   — Configura o muestra WiFi"));
     Serial.println(F("  status                       — Estado del sistema"));
     Serial.println(F("  restart                      — Reinicia el ESP32"));
     Serial.println(F("  help                         — Esta ayuda"));
