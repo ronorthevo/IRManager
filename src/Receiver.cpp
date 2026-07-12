@@ -1,56 +1,88 @@
+// ============================================================
+//  IRManager — src/Receiver.cpp
+// ============================================================
 #include "Receiver.h"
 
-#include <Arduino.h>
 #include <IRremoteESP8266.h>
-#include <IRrecv.h>
-#include <IRutils.h>
+#include <IRutils.h>        // typeToString(), resultToHumanReadableBasic()
+#include "Config.h"
 
-static const uint16_t RECV_PIN = 15;
-
-IRrecv irrecv(RECV_PIN);
-decode_results results;
-
-void Receiver::begin()
+// ─────────────────────────────────────────────────────────────
+//  Constructor
+// ─────────────────────────────────────────────────────────────
+Receiver::Receiver(uint8_t pin)
+    : _pin(pin)
+    , _irrecv(pin, IR_RECV_BUF_SIZE, IR_RECV_TIMEOUT, /* saveBuffer */ true)
+    , _listening(false)
 {
-    irrecv.enableIRIn();
 }
 
-bool Receiver::learn(const String &device, const String &button)
-{
-    Serial.println();
-    Serial.println("======================");
-    Serial.println("Esperando señal IR...");
-    Serial.println("======================");
+// ─────────────────────────────────────────────────────────────
+//  begin()
+//  Activa el receptor de hardware IR y habilita la escucha.
+// ─────────────────────────────────────────────────────────────
+void Receiver::begin() {
+    _irrecv.setUnknownThreshold(12);   // mínimo de marcas para UNKNOWN
+    _irrecv.setTolerance(25);           // tolerancia de timing en %
+    _irrecv.enableIRIn();
+    _listening = true;
+}
 
-    while (true)
-    {
-        if (irrecv.decode(&results))
-        {
-            Serial.println();
-
-            Serial.print("Dispositivo : ");
-            Serial.println(device);
-
-            Serial.print("Botón       : ");
-            Serial.println(button);
-
-            Serial.print("Protocolo   : ");
-            Serial.println(typeToString(results.decode_type));
-
-            Serial.print("Bits        : ");
-            Serial.println(results.bits);
-
-            Serial.print("Valor       : ");
-            Serial.println(resultToHexidecimal(&results));
-
-            Serial.println();
-            Serial.println(resultToSourceCode(&results));
-
-            irrecv.resume();
-
-            return true;
-        }
-
-        delay(1);
+// ─────────────────────────────────────────────────────────────
+//  loop()
+//  Sondea el decodificador. Si hay señal, la convierte a
+//  IRSignal y suspende la escucha hasta resume().
+// ─────────────────────────────────────────────────────────────
+IRSignal Receiver::loop() {
+    if (!_listening) {
+        return IRSignal{};   // valid = false por defecto
     }
+
+    if (_irrecv.decode(&_results)) {
+        _listening = false;  // suspender hasta que el llamador decida
+        return _buildSignal(_results);
+    }
+
+    return IRSignal{};       // nada recibido
+}
+
+// ─────────────────────────────────────────────────────────────
+//  resume()
+//  Reanuda la escucha IR. Llamar DESPUÉS de haber procesado
+//  completamente la señal anterior (guardar, imprimir, etc.).
+// ─────────────────────────────────────────────────────────────
+void Receiver::resume() {
+    _irrecv.resume();
+    _listening = true;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  _buildSignal()  [private]
+//  Transforma decode_results en un IRSignal limpio.
+// ─────────────────────────────────────────────────────────────
+IRSignal Receiver::_buildSignal(const decode_results& r) const {
+    IRSignal sig;
+
+    sig.valid    = true;
+    sig.protocol = r.decode_type;
+    sig.value    = r.value;
+    sig.bits     = r.bits;
+    sig.address  = r.address;
+    sig.command  = r.command;
+
+    // Frecuencia de portadora.
+    // IRremoteESP8266 expone la frecuencia solo para algunos protocolos;
+    // para el resto usamos el valor por defecto de 38 kHz.
+    sig.frequencyHz = IR_DEFAULT_FREQ_HZ;
+
+    // Raw data: copiar el buffer completo.
+    // rawbuf[0] es el gap inicial (no pertenece a la señal), se omite.
+    sig.rawData.reserve(r.rawlen - 1);
+    for (uint16_t i = 1; i < r.rawlen; ++i) {
+        // Los valores de rawbuf están en unidades de RAWTICK (50 µs).
+        // Los multiplicamos por RAWTICK para obtener µs reales.
+        sig.rawData.push_back(r.rawbuf[i] * kRawTick);
+    }
+
+    return sig;
 }
