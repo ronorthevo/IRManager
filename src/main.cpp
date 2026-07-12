@@ -2,12 +2,14 @@
 //  IRManager — src/main.cpp
 //  Punto de entrada del firmware.
 //
-//  v0.2: Storage LittleFS operativo. Flujo learn completo:
-//        consola → PendingLearn → captura IR → Storage.
+//  v0.5: WebServer + REST API activos.
+//        El flujo learn acepta peticiones desde consola serie
+//        Y desde el endpoint POST /api/learn.
 //
-//  ARQUITECTURA DE DEPENDENCIAS (sin cambios desde v0.1):
-//    main.cpp es el único coordinador. Los módulos no se
-//    conocen entre sí. No hay dependencias circulares.
+//  ARQUITECTURA DE DEPENDENCIAS:
+//    main.cpp es el único coordinador. No hay dependencias
+//    circulares. main.cpp es el único que llama a múltiples
+//    módulos en secuencia.
 // ============================================================
 
 #define ARDUINO_USB_MODE        1
@@ -27,6 +29,7 @@
 
 // ─────────────────────────────────────────────────────────────
 //  Instancias de módulos
+//  Orden: módulos sin dependencias primero.
 // ─────────────────────────────────────────────────────────────
 static Receiver    receiver(IR_RECV_PIN);
 static Sender      sender(IR_SEND_PIN);
@@ -35,8 +38,12 @@ static WifiManager wifiManager;
 static WebServer   webServer(80);
 static Console     console(&storage, &receiver, &sender, &wifiManager);
 
+// Api se instancia tras webServer (necesita el AsyncWebServer*)
+// Se usa un puntero para permitir inicialización diferida.
+static Api*        api = nullptr;
+
 // ─────────────────────────────────────────────────────────────
-//  Helpers de impresión IR
+//  Helper: imprimir señal IR en monitor serie
 // ─────────────────────────────────────────────────────────────
 static void printSignal(const IRSignal& sig) {
     Serial.println(F("\n╔══════════════════════════════════════╗"));
@@ -74,6 +81,42 @@ static void printSignal(const IRSignal& sig) {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  Helper: procesar señal IR capturada
+//  Comprueba si hay un learn pendiente (desde consola o API)
+//  y actúa en consecuencia.
+// ─────────────────────────────────────────────────────────────
+static void handleSignal(const IRSignal& signal) {
+    // ── Prioridad 1: learn desde consola serie ───────────────
+    const PendingLearn& consolePending = console.getPendingLearn();
+    if (consolePending.active) {
+        const bool ok = storage.saveButton(
+            consolePending.device, consolePending.button, signal);
+        if (ok) console.notifyLearnSuccess(consolePending.device, consolePending.button);
+        else    console.notifyLearnFailed (consolePending.device, consolePending.button);
+        console.clearPendingLearn();
+        return;
+    }
+
+    // ── Prioridad 2: learn desde REST API ───────────────────
+    if (api != nullptr) {
+        const ApiPendingLearn& apiPending = api->getPendingLearn();
+        if (apiPending.active) {
+            const String device(apiPending.device);
+            const String button(apiPending.button);
+            const bool ok = storage.saveButton(device, button, signal);
+            api->notifyLearnResult(ok);
+            api->clearPendingLearn();
+            Serial.printf("[IRManager] Learn API: %s → %s / %s\n",
+                          ok ? "OK" : "ERROR", device.c_str(), button.c_str());
+            return;
+        }
+    }
+
+    // ── Sin learn pendiente: modo monitor ───────────────────
+    printSignal(signal);
+}
+
+// ─────────────────────────────────────────────────────────────
 //  setup()
 // ─────────────────────────────────────────────────────────────
 void setup() {
@@ -85,11 +128,10 @@ void setup() {
 
     console.printBanner();
 
-    // ── Storage (LittleFS) ───────────────────────────────────
+    // ── LittleFS ────────────────────────────────────────────
     Serial.println(F("[Storage] Montando LittleFS..."));
     if (!storage.begin()) {
         Serial.println(F("[Storage] ADVERTENCIA: LittleFS no disponible."));
-        Serial.println(F("[Storage] Los botones no se podrán guardar."));
     }
 
     // ── Receptor IR ─────────────────────────────────────────
@@ -97,18 +139,31 @@ void setup() {
     receiver.begin();
     Serial.println(F("[Receiver] OK — Escuchando señales IR."));
 
-    // Emisor IR — begin() reserva el canal RMT del GPIO.
-    // El LED IR no necesita estar físicamente conectado para inicializar.
+    // ── Emisor IR ───────────────────────────────────────────
     Serial.printf("[Sender] Iniciando en GPIO %d...\n", IR_SEND_PIN);
     sender.begin();
 
-    // [STUB v0.6] webServer.begin()
-
-    // WiFi AP+STA con portal cautivo
+    // ── WiFi ────────────────────────────────────────────────
     wifiManager.begin();
+
+    // ── WebServer ───────────────────────────────────────────
+    webServer.begin();
+
+    // ── REST API ────────────────────────────────────────────
+    // Instanciamos Api aquí (post-WiFi, post-WebServer)
+    api = new Api(webServer.server(), &storage,
+                  &receiver, &sender, &wifiManager);
+    api->registerRoutes();
 
     Serial.println();
     Serial.println(F("[IRManager] Sistema listo."));
+    if (wifiManager.isConnected()) {
+        Serial.printf("[IRManager] Interfaz web: http://%s\n",
+                      wifiManager.localIP().c_str());
+    } else if (wifiManager.isAP()) {
+        Serial.printf("[IRManager] Portal: http://%s  (AP: %s)\n",
+                      wifiManager.apIP().c_str(), WifiConfig::AP_SSID);
+    }
     Serial.println(F("[IRManager] Escribe 'help' para ver los comandos.\n"));
 }
 
@@ -121,33 +176,14 @@ void loop() {
 
     // ── 2. Receptor IR ───────────────────────────────────────
     const IRSignal signal = receiver.loop();
-
     if (signal.valid) {
-        const PendingLearn& pending = console.getPendingLearn();
-
-        if (pending.active) {
-            // ── Flujo learn: guardar la señal capturada ──────
-            const bool saved = storage.saveButton(
-                pending.device, pending.button, signal);
-
-            if (saved) {
-                console.notifyLearnSuccess(pending.device, pending.button);
-            } else {
-                console.notifyLearnFailed(pending.device, pending.button);
-            }
-
-            console.clearPendingLearn();
-
-        } else {
-            // ── Modo monitor: solo imprimir ──────────────────
-            printSignal(signal);
-        }
-
-        // Reanudar escucha en ambos casos
+        handleSignal(signal);
         receiver.resume();
     }
 
-    // ── 3. WiFi ───────────────────────────────────────
+    // ── 3. WiFi ──────────────────────────────────────────────
     wifiManager.loop();
-    // [STUB v0.6] webServer implicitly handled by AsyncWebServer
+
+    // AsyncWebServer no requiere loop() — maneja conexiones
+    // en su propio task de FreeRTOS.
 }

@@ -1,24 +1,24 @@
 // ============================================================
 //  IRManager — src/WebServer.h
-//  Responsabilidad única: servir ficheros estáticos desde
-//  LittleFS (/data/) — HTML, CSS, JS de la interfaz web.
-//  [STUB v0.1] — Implementación completa en v0.6.
+//  Responsabilidad única: arrancar AsyncWebServer y servir
+//  los ficheros estáticos desde LittleFS (/data/).
+//  v0.5 — Implementación completa.
 // ============================================================
 #pragma once
 
 #include <Arduino.h>
-
-class AsyncWebServer;
+#include <ESPAsyncWebServer.h>
 
 class WebServer {
 public:
     explicit WebServer(uint16_t port = 80);
 
-    // Inicializa y arranca el servidor HTTP.
+    // Inicializa AsyncWebServer, registra la ruta estática y
+    // habilita CORS global (necesario para futura app Android).
     void begin();
 
-    // Devuelve el puntero al servidor (para que Api lo use).
-    AsyncWebServer* server();
+    // Devuelve puntero al servidor para que Api registre las rutas.
+    AsyncWebServer* server() { return _server; }
 
 private:
     uint16_t        _port;

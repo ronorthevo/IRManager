@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="IRManager — Gestor universal de mandos infrarrojos para ESP32-S3"/>
+  <title>IRManager</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     HEADER
+═══════════════════════════════════════════════════════════ -->
+<header id="app-header">
+  <div class="header-brand">
+    <span class="header-icon">📡</span>
+    <span class="header-title">IRManager</span>
+    <span id="fw-version" class="header-badge"></span>
+  </div>
+  <div class="header-status">
+    <div id="wifi-indicator" class="status-pill disconnected">
+      <span class="status-dot"></span>
+      <span id="wifi-label">WiFi</span>
+    </div>
+    <div class="status-pill neutral">
+      <span id="heap-label">--</span>
+    </div>
+    <div class="status-pill neutral">
+      <span id="fs-label">--</span>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════
+     LAYOUT PRINCIPAL
+═══════════════════════════════════════════════════════════ -->
+<div id="app-layout">
+
+  <!-- ── Sidebar: dispositivos ── -->
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <h2>Dispositivos</h2>
+      <span id="device-count" class="badge">0</span>
+    </div>
+    <ul id="device-list"></ul>
+    <div class="sidebar-footer">
+      <button id="btn-refresh" class="btn btn-ghost btn-sm" onclick="loadDevices()">
+        ↻ Actualizar
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── Área principal ── -->
+  <main id="main-area">
+
+    <!-- Panel vacío (sin dispositivo seleccionado) -->
+    <div id="empty-state">
+      <div class="empty-icon">🎮</div>
+      <h3>Selecciona un dispositivo</h3>
+      <p>O aprende tu primer botón con el mando IR</p>
+      <button class="btn btn-primary" onclick="openLearnModal()">
+        ＋ Aprender señal
+      </button>
+    </div>
+
+    <!-- Panel de botones del dispositivo -->
+    <div id="device-panel" class="hidden">
+      <div class="panel-header">
+        <div>
+          <h2 id="panel-device-name"></h2>
+          <span id="panel-btn-count" class="badge"></span>
+        </div>
+        <div class="panel-actions">
+          <button class="btn btn-primary btn-sm" onclick="openLearnModal()">
+            ＋ Aprender
+          </button>
+        </div>
+      </div>
+      <div id="button-grid"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     LEARN MODAL
+═══════════════════════════════════════════════════════════ -->
+<div id="learn-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" onclick="closeLearnModal()"></div>
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeLearnModal()">✕</button>
+    <h3 class="modal-title">Aprender señal IR</h3>
+
+    <div id="learn-form">
+      <label class="field-label" for="learn-device">Dispositivo</label>
+      <input id="learn-device" class="field-input" type="text"
+             placeholder="Samsung, LG, Daitsu…" autocomplete="off"/>
+
+      <label class="field-label" for="learn-button">Botón</label>
+      <input id="learn-button" class="field-input" type="text"
+             placeholder="POWER, VOL+, MUTE…" autocomplete="off"/>
+
+      <button id="btn-learn-start" class="btn btn-primary btn-full"
+              onclick="startLearn()">
+        📡 Iniciar captura
+      </button>
+    </div>
+
+    <div id="learn-waiting" class="hidden">
+      <div class="learn-animation">
+        <div class="pulse-ring"></div>
+        <span class="learn-icon">📡</span>
+      </div>
+      <p class="learn-hint" id="learn-hint-text">Apunta el mando al receptor y pulsa el botón…</p>
+      <button class="btn btn-ghost btn-sm" onclick="cancelLearn()">Cancelar</button>
+    </div>
+
+    <div id="learn-result" class="hidden">
+      <div id="learn-result-icon" class="result-icon"></div>
+      <p id="learn-result-text"></p>
+      <button class="btn btn-primary" onclick="resetLearnModal()">Aprender otro</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     WIFI MODAL
+═══════════════════════════════════════════════════════════ -->
+<div id="wifi-modal" class="modal hidden" role="dialog">
+  <div class="modal-backdrop" onclick="closeWifiModal()"></div>
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeWifiModal()">✕</button>
+    <h3 class="modal-title">Configurar WiFi</h3>
+    <label class="field-label" for="wifi-ssid">SSID (nombre de red)</label>
+    <input id="wifi-ssid" class="field-input" type="text" placeholder="MiRedWiFi"/>
+    <label class="field-label" for="wifi-pass">Contraseña</label>
+    <input id="wifi-pass" class="field-input" type="password" placeholder="••••••••"/>
+    <button class="btn btn-primary btn-full" onclick="saveWifi()">
+      Guardar y reiniciar
+    </button>
+    <div id="wifi-status-detail" class="status-card"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     CONFIRM MODAL
+═══════════════════════════════════════════════════════════ -->
+<div id="confirm-modal" class="modal hidden" role="dialog">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box modal-box-sm">
+    <h3 class="modal-title" id="confirm-title">¿Confirmar?</h3>
+    <p id="confirm-text"></p>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeConfirm()">Cancelar</button>
+      <button id="btn-confirm-ok" class="btn btn-danger">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     TOAST
+═══════════════════════════════════════════════════════════ -->
+<div id="toast-container"></div>
+
+<!-- ══════════════════════════════════════════════════════════
+     FOOTER
+═══════════════════════════════════════════════════════════ -->
+<footer id="app-footer">
+  <button class="btn btn-ghost btn-sm" onclick="openWifiModal()">⚙ WiFi</button>
+  <span id="footer-ip"></span>
+  <span id="footer-uptime"></span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
